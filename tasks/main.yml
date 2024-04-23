@@ -9,7 +9,8 @@
     name: ['gcc', 'g++', 'make', 'cmake', 'build-essential', 'git', 'libxtables-dev',
         'libip6tc-dev', 'libip4tc-dev', 'libiptc-dev', 'libavfilter-dev', 'libavcodec-dev', 'libswresample-dev',
         'libevent-dev', 'libpcap-dev', 'libxmlrpc-core-c3-dev', 'markdown', 'libjson-glib-dev',
-        'libhiredis-dev', 'libssl-dev', 'libcurl4-openssl-dev', 'gperf', 'libspandsp-dev', 'libwebsockets-dev', 'libbpf-dev']
+        'libhiredis-dev', 'libssl-dev', 'libcurl4-openssl-dev', 'gperf', 'libspandsp-dev', 'libwebsockets-dev', 'libopus-dev',
+        'libmnl-dev', 'libnftnl-dev', 'pandoc', 'libncurses-dev', 'linux-headers-amd64', 'linux-source', 'linux-source-6.1']
     state: present
 
 - name: Install mysql client
@@ -40,6 +41,11 @@
     force: yes
   become: false
 
+- name: ensure bcg729 was cloned successful
+  stat:
+    path: "/usr/local/src/bcg729"
+  register: bcg729_exist 
+
 - name: build bcg729
   shell: |
     cmake . -DCMAKE_INSTALL_PREFIX=/usr
@@ -47,9 +53,12 @@
     make
 
     make install chdir=/usr/local/src/bcg729
+    
+    exit 0
   args:
     chdir: /usr/local/src/bcg729
   become: true
+  when: bcg729_exist|bool
 
 - name: check out rtpengine
   git:
@@ -61,17 +70,25 @@
     force: true
   become: false
 
+- name: check exist rtpengine source
+  stat:
+    path: /usr/local/src/rtpengine
+  register: rtpengine_source_exist
+
 - name: build rtpengine
   command:
     chdir: /usr/local/src/rtpengine
     argv:
     - make
-    - with-kernel
-    - with_transcoding=true
+    - with_transcoding=yes
+    - '{{ enable_kernel }}'
     - chdir=/usr/local/src/rtpengine/daemon
+  register: build_rtpengine_result
+  # when: rtpengine_source_exist.stat.exists
 
-- name: install rtpengine
+- name: install rtpengine {{ build_rtpengine_result }}
   command: cp /usr/local/src/rtpengine/daemon/rtpengine /usr/local/bin
+  # when: build_rtpengine_result.failed != false
 
 - name: Create systemd unit file
   template:
@@ -80,6 +97,13 @@
     mode: '0644'
     owner: root
     group: root
+
+- name: Populate service facts
+  ansible.builtin.service_facts:
+
+- name: Print service facts
+  ansible.builtin.debug:
+    var: ansible_facts.services
 
 - name: systemctl daemon-reload
   ansible.builtin.systemd_service:
